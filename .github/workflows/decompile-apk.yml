@@ -1,0 +1,64 @@
+name: Decompile ErLuSuixing APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  decompile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check input APK
+        run: |
+          if [ ! -f app.apk ]; then
+            echo "::error::Missing app.apk. Upload the original 0.1.15 APK to the repository root first."
+            exit 1
+          fi
+          file app.apk
+          ls -lh app.apk
+
+      - name: Download JADX
+        run: |
+          set -euo pipefail
+          URL="$(curl -fsSL https://api.github.com/repos/skylot/jadx/releases/latest | jq -r '[.assets[] | select(.name | test("^jadx-[0-9].*\\.zip$")) | .browser_download_url][0] // empty')"
+          if [ -z "$URL" ]; then
+            echo "Could not locate the JADX release ZIP."
+            exit 1
+          fi
+          curl -fL "$URL" -o /tmp/jadx.zip
+          mkdir -p /tmp/jadx
+          unzip -q /tmp/jadx.zip -d /tmp/jadx
+          chmod +x /tmp/jadx/bin/jadx
+          /tmp/jadx/bin/jadx --version
+
+      - name: Decompile APK to Java-like source
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          /tmp/jadx/bin/jadx --show-bad-code --deobf -d output/jadx app.apk 2>&1 | tee output/jadx.log
+          test -d output/jadx/sources
+          grep -R -n -E 'class (MainActivity|FloatingService|MediaProxy|BiliClient)|audioPositionMs|floatingStart|floatingStatus' output/jadx/sources > output/key-findings.txt || true
+
+      - name: Package decompilation output
+        if: always()
+        run: |
+          mkdir -p output
+          zip -qr decompiled-source.zip output || true
+
+      - name: Upload decompilation artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: erlusui-xing-0.1.15-decompiled
+          path: |
+            decompiled-source.zip
+            output/jadx.log
+            output/key-findings.txt
+          if-no-files-found: warn
+          retention-days: 7
