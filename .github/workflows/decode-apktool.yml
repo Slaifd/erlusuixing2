@@ -1,0 +1,60 @@
+name: Decode ErLuSuixing APK with Apktool
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  decode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check input APK
+        run: |
+          set -euo pipefail
+          test -f app.apk || { echo '::error::Missing app.apk in repository root'; exit 1; }
+          file app.apk
+          ls -lh app.apk
+
+      - name: Install Apktool and utilities
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y apktool zip unzip
+          apktool --version
+
+      - name: Decode APK resources and Smali
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          apktool d app.apk -o output/apktool --force 2>&1 | tee output/apktool.log
+          test -d output/apktool/smali
+          test -f output/apktool/AndroidManifest.xml
+          find output/apktool -maxdepth 2 -type d -name 'smali*' -print > output/smali-dex-folders.txt
+          grep -R -n -E 'audioPositionMs|audioPlaying|audioStatus|floatingClock|floatingPacket|openAudio|startChat|floatingStart' output/apktool/smali* > output/key-smali-findings.txt || true
+          mkdir -p output/source-assets
+          unzip -j app.apk 'assets/app.js' 'assets/floating.js' 'assets/core.js' 'assets/index.html' 'assets/floating.html' -d output/source-assets >/dev/null || true
+
+      - name: Package decoded project
+        if: always()
+        run: |
+          mkdir -p output
+          if [ -d output/apktool ]; then zip -qr apktool-decoded-project.zip output; fi
+
+      - name: Upload decoded project artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: erlusui-xing-0.1.15-apktool-decoded
+          path: |
+            apktool-decoded-project.zip
+            output/apktool.log
+            output/key-smali-findings.txt
+            output/smali-dex-folders.txt
+          if-no-files-found: warn
+          retention-days: 7
